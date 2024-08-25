@@ -16,37 +16,68 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         } else {
             $error = "Password incorrect!";
         }
-    } elseif (isset($_POST['directory']) && isset($_SESSION['authenticated']) && $_SESSION['authenticated'] === true) {
-        // Handle permission change
-        $directory = rtrim($_POST['directory'], '/'); 
-        $dirPermissions = isset($_POST['dir_permissions']) ? $_POST['dir_permissions'] : null;
-        $filePermissions = isset($_POST['file_permissions']) ? $_POST['file_permissions'] : null;
+    } elseif (isset($_SESSION['authenticated']) && $_SESSION['authenticated'] === true) {
+        if (isset($_POST['directory_structure']) && !empty($_POST['directory_structure'])) {
+            // Handle directory creation
+            $directoryStructure = explode(',', $_POST['directory_structure']);
+            $dirPermissions = isset($_POST['dir_permissions']) ? $_POST['dir_permissions'] : null;
+            $filePermissions = isset($_POST['file_permissions']) ? $_POST['file_permissions'] : null;
 
-        function setPermissions($dir, $dirPerm = null, $filePerm = null) {
-            if ($dirPerm) {
-                chmod($dir, octdec($dirPerm));
-            }
+            createDirectories(getcwd(), $directoryStructure, $dirPermissions, $filePermissions);
+            $successMessage = "Directories created and permissions set successfully.";
+        } elseif (isset($_POST['directory']) && !empty($_POST['directory']) && (isset($_POST['dir_permissions']) || isset($_POST['file_permissions']))) {
+            // Handle permission change
+            $directory = rtrim($_POST['directory'], '/');
+            $dirPermissions = isset($_POST['dir_permissions']) ? $_POST['dir_permissions'] : null;
+            $filePermissions = isset($_POST['file_permissions']) ? $_POST['file_permissions'] : null;
 
-            $dirHandle = opendir($dir);
-            if ($dirHandle) {
-                while (($file = readdir($dirHandle)) !== false) {
-                    if ($file != '.' && $file != '..') {
-                        $filePath = $dir . DIRECTORY_SEPARATOR . $file;
-                        if (is_dir($filePath)) {
-                            setPermissions($filePath, $dirPerm, $filePerm); // Recursively set permissions on subdirectories
-                        } else if ($filePerm) {
-                            chmod($filePath, octdec($filePerm)); // Set file permissions
-                        }
-                    }
-                }
-                closedir($dirHandle);
-            } else {
-                echo "Error: Unable to open directory $dir";
-            }
+            setPermissions($directory, $dirPermissions, $filePermissions);
+            $successMessage = "Permissions have been set for the directory and its subdirectories/files.";
+        }
+    }
+}
+
+// Function to create directories with optional permissions
+function createDirectories($baseDir, $dirStructure, $dirPerm = null, $filePerm = null) {
+    foreach ($dirStructure as $dirPath) {
+        $fullPath = rtrim($baseDir, '/') . DIRECTORY_SEPARATOR . trim($dirPath);
+
+        if (!file_exists($fullPath)) {
+            mkdir($fullPath, $dirPerm ? octdec($dirPerm) : 0777, true);
         }
 
-        setPermissions($directory, $dirPermissions, $filePermissions);
-        $successMessage = "Permissions telah diatur untuk direktori dan semua subdirektori serta file di dalamnya.";
+        if ($dirPerm) {
+            chmod($fullPath, octdec($dirPerm));
+        }
+
+        // Recursively apply file permissions if needed
+        if ($filePerm) {
+            setPermissions($fullPath, $dirPerm, $filePerm);
+        }
+    }
+}
+
+// Function to set permissions on directories and files
+function setPermissions($dir, $dirPerm = null, $filePerm = null) {
+    if ($dirPerm) {
+        chmod($dir, octdec($dirPerm));
+    }
+
+    $dirHandle = opendir($dir);
+    if ($dirHandle) {
+        while (($file = readdir($dirHandle)) !== false) {
+            if ($file != '.' && $file != '..') {
+                $filePath = $dir . DIRECTORY_SEPARATOR . $file;
+                if (is_dir($filePath)) {
+                    setPermissions($filePath, $dirPerm, $filePerm); // Recursively set permissions on subdirectories
+                } else if ($filePerm) {
+                    chmod($filePath, octdec($filePerm)); // Set file permissions
+                }
+            }
+        }
+        closedir($dirHandle);
+    } else {
+        echo "Error: Unable to open directory $dir";
     }
 }
 
@@ -83,7 +114,7 @@ $directories = getDirectories($baseDirectory);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Set File Permissions - Xjerry</title>
+    <title>Create Directories & Set Permissions - Xjerry</title>
     <!-- Add CSS for styling -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
@@ -104,7 +135,7 @@ $directories = getDirectories($baseDirectory);
     <div class="container">
         <div class="card">
             <div class="card-header">
-                <h2>Set File Permissions - Xjerry</h2>
+                <h2>Create Directories & Set Permissions - Xjerry</h2>
             </div>
             <div class="card-body">
                 <?php if (isset($_SESSION['authenticated']) && $_SESSION['authenticated'] === true): ?>
@@ -113,8 +144,13 @@ $directories = getDirectories($baseDirectory);
                     <?php endif; ?>
                     <form method="post" action="">
                         <div class="form-group">
-                            <label for="directory">Pilih direktori:</label>
-                            <select class="form-control" id="directory" name="directory" required>
+                            <label for="directory_structure">create a directory:</label>
+                            <input type="text" class="form-control" id="directory_structure" name="directory_structure" placeholder="dir1, dir1/dir2, dir1/dir2/dir3">
+                        </div>
+                        <div class="form-group">
+                            <label for="directory">Or select an existing directory to set permissions:</label>
+                            <select class="form-control" id="directory" name="directory">
+                                <option value="">-- Select Directory --</option>
                                 <?php foreach ($directories as $dir): ?>
                                     <option value="<?php echo htmlspecialchars($baseDirectory . DIRECTORY_SEPARATOR . $dir); ?>">
                                         <?php echo htmlspecialchars($dir); ?>
@@ -123,19 +159,19 @@ $directories = getDirectories($baseDirectory);
                             </select>
                         </div>
                         <div class="form-group">
-                            <label for="dir_permissions">Permissions untuk direktori (contoh: 0755):</label>
-                            <input type="text" class="form-control" id="dir_permissions" name="dir_permissions" placeholder="Contoh: 0755">
+                            <label for="dir_permissions">Permissions for directories (0755):</label>
+                            <input type="text" class="form-control" id="dir_permissions" name="dir_permissions" placeholder="0755">
                         </div>
                         <div class="form-group">
-                            <label for="file_permissions">Permissions untuk file (contoh: 0644):</label>
-                            <input type="text" class="form-control" id="file_permissions" name="file_permissions" placeholder="Contoh: 0644">
+                            <label for="file_permissions">Permissions for files (0644):</label>
+                            <input type="text" class="form-control" id="file_permissions" name="file_permissions" placeholder="0644">
                         </div>
-                        <button type="submit" class="btn btn-primary">Set Permissions</button>
+                        <button type="submit" class="btn btn-primary">Execute</button>
                     </form>
                 <?php else: ?>
                     <form method="post" action="">
                         <div class="form-group">
-                            <label for="password">Masukkan password:</label>
+                            <label for="password">Enter password:</label>
                             <input type="password" class="form-control" id="password" name="password" required>
                         </div>
                         <?php if (isset($error)): ?>
@@ -148,7 +184,7 @@ $directories = getDirectories($baseDirectory);
         </div>
     </div>
 
-    <!-- Add JavaScript for interactivity -->
+    <!-- Add JavaScript forinteractivity -->
     <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.2/dist/umd/popper.min.js"></script>
     <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
